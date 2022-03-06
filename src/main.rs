@@ -10,6 +10,7 @@
 #![no_std]
 #![no_main]
 
+use core::convert::Infallible;
 // The macro for our start-up function
 use cortex_m_rt::entry;
 
@@ -33,6 +34,9 @@ use rp_pico::hal::pac;
 // A shorter alias for the Hardware Abstraction Layer, which provides
 // higher-level drivers.
 use rp_pico::hal;
+
+enum Color {GREEN, YELLOW, RED}
+
 
 /// Entry point to our bare-metal application.
 ///
@@ -80,15 +84,24 @@ fn main() -> ! {
         &mut pac.RESETS,
     );
 
-    // Set the LED to be an output
-    let mut led_pin = pins.led.into_push_pull_output();
+    let mut led_pins: [&mut dyn OutputPin<Error = Infallible>; 10] = [&mut pins.gpio19.into_push_pull_output(), &mut pins.gpio18.into_push_pull_output(),
+        &mut pins.gpio17.into_push_pull_output(), &mut pins.gpio16.into_push_pull_output(),
+        &mut pins.gpio20.into_push_pull_output(), &mut pins.gpio11.into_push_pull_output(),
+        &mut pins.gpio15.into_push_pull_output(), &mut pins.gpio14.into_push_pull_output(),
+        &mut pins.gpio13.into_push_pull_output(), &mut pins.gpio12.into_push_pull_output(),
+    ];
+    
+    
+    let led_count = led_pins.len();
 
     // Blink the LED at 1 Hz
+    let mut index = 0;
     loop {
+        index = (index + 1) % led_count; 
+        let led_pin = &mut led_pins[index];
         led_pin.set_high().unwrap();
-        delay.delay_ms(900);
+        delay.delay_ms(50);
         led_pin.set_low().unwrap();
-        delay.delay_ms(100);
     }
 }
 
