@@ -84,11 +84,11 @@ fn main() -> ! {
         &mut pac.RESETS,
     );
 
-    let mut led_pins: [&mut dyn OutputPin<Error = Infallible>; 10] = [&mut pins.gpio19.into_push_pull_output(), &mut pins.gpio18.into_push_pull_output(),
-        &mut pins.gpio17.into_push_pull_output(), &mut pins.gpio16.into_push_pull_output(),
-        &mut pins.gpio20.into_push_pull_output(), &mut pins.gpio11.into_push_pull_output(),
-        &mut pins.gpio15.into_push_pull_output(), &mut pins.gpio14.into_push_pull_output(),
-        &mut pins.gpio13.into_push_pull_output(), &mut pins.gpio12.into_push_pull_output(),
+    let mut led_pins: [&mut dyn OutputPin<Error = Infallible>; 10] = [&mut pins.gpio21.into_push_pull_output(), &mut pins.gpio22.into_push_pull_output(),
+        &mut pins.gpio26.into_push_pull_output(), &mut pins.gpio27.into_push_pull_output(),
+        &mut pins.gpio28.into_push_pull_output(), &mut pins.gpio16.into_push_pull_output(),
+        &mut pins.gpio17.into_push_pull_output(), &mut pins.gpio18.into_push_pull_output(),
+        &mut pins.gpio19.into_push_pull_output(), &mut pins.gpio20.into_push_pull_output(),
     ];
     
     
