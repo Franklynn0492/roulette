@@ -17,7 +17,7 @@ mod app{
     use cortex_m::interrupt::Mutex;
 
     // GPIO traits
-    use embedded_hal::digital::v2::OutputPin;
+    use embedded_hal::digital::v2::{OutputPin, PinState};
 
     // Time handling traits
     use embedded_time::rate::*;
@@ -36,6 +36,7 @@ mod app{
     struct Shared {
         delay: cortex_m::delay::Delay,
         rolling: Mutex<bool>,
+        display_toggle_pin: Pin<Gpio14, Output<PushPull>>,
     }
 
 
@@ -97,12 +98,13 @@ mod app{
         );        
 
         pins.gpio15.set_interrupt_enabled(hal::gpio::Interrupt::EdgeHigh, true);
+        let display_toggle_pin = pins.gpio14.into_push_pull_output();
 
-        (Shared { rolling: Mutex::new(true), delay }, Local {led_pins}, init::Monotonics())
+        (Shared { rolling: Mutex::new(true), delay, display_toggle_pin }, Local {led_pins}, init::Monotonics())
     }
 
     /// Executed after the init-task. Replaces the entry task
-    #[idle(local = [led_pins], shared = [delay, rolling])]
+    #[idle(local = [led_pins], shared = [delay, rolling, display_toggle_pin])]
     fn idle(context: idle::Context) -> ! {
         let led_pins = context.local.led_pins;
         let mut led_pins_arr: [&mut dyn OutputPin<Error = Infallible>; 10] = [
@@ -111,11 +113,13 @@ mod app{
 
         
         let mut delay_mutex = context.shared.delay;
+        let mut display_toggle_pin_mutex = context.shared.display_toggle_pin;
         
         let led_count = led_pins_arr.len();
 
         // Blink the LED at 1 Hz
         let mut index = 0;
+        let mut out_state = PinState::Low;
         loop {
             delay_mutex.lock(|delay| {
                 index = (index + 1) % led_count; 
@@ -123,8 +127,11 @@ mod app{
                 led_pin.set_high().unwrap();
                 delay.delay_ms(NORMAL_RUN_DELAY_MS);
                 led_pin.set_low().unwrap();
+            });
+            if index % 10 == 0 {
+                display_toggle_pin_mutex.lock(|toggle_pin| toggle_pin.set_state(out_state)).unwrap();
+                out_state = if out_state == PinState::Low { PinState::High } else { PinState::Low };
             }
-            )
         }
     }
 }
