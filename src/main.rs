@@ -36,7 +36,7 @@ mod app{
     struct Shared {
         delay: cortex_m::delay::Delay,
         rolling: Mutex<bool>,
-        display_toggle_pin: Pin<Gpio14, Output<PushPull>>,
+        display_toggle_pin: Pin<Gpio2, Output<PushPull>>,
     }
 
 
@@ -98,7 +98,7 @@ mod app{
         );        
 
         pins.gpio15.set_interrupt_enabled(hal::gpio::Interrupt::EdgeHigh, true);
-        let display_toggle_pin = pins.gpio14.into_push_pull_output();
+        let display_toggle_pin = pins.gpio2.into_push_pull_output();
 
         (Shared { rolling: Mutex::new(true), delay, display_toggle_pin }, Local {led_pins}, init::Monotonics())
     }
