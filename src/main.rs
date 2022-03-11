@@ -30,18 +30,10 @@ mod app{
     // be linked)
     use panic_halt as _;
 
-    use rp_pico::hal::gpio::Interrupt;
+    use rp_pico::hal::gpio::bank0::*;
+    use rp_pico::hal::gpio::{Interrupt, PushPull, Output};
     // Pull in any important traits
-    use rp_pico::hal::prelude::*;
-
-    // A shorter alias for the Peripheral Access Crate, which provides low-level
-    // register access
-    use rp_pico::hal::pac;
-
-    // A shorter alias for the Hardware Abstraction Layer, which provides
-    // higher-level drivers.
-    use rp_pico::hal;
-
+    use rp_pico::hal::{self, prelude::*, pac, Watchdog, gpio::pin::Pin};
 
     #[shared]
     struct Shared {
@@ -54,67 +46,59 @@ mod app{
     /// In my own words: local resources are initialized by the init-task and can only be accessed by a single task
     #[local]
     struct Local {
-        led_pins: Vec<&'static (dyn OutputPin<Error = Infallible> + Send + Sync), 10>,
+        led_pins: (
+            Pin<Gpio21, Output<PushPull>>, Pin<Gpio22, Output<PushPull>>,
+            Pin<Gpio26, Output<PushPull>>, Pin<Gpio27, Output<PushPull>>,
+            Pin<Gpio28, Output<PushPull>>, Pin<Gpio16, Output<PushPull>>,
+            Pin<Gpio17, Output<PushPull>>, Pin<Gpio18, Output<PushPull>>,
+            Pin<Gpio19, Output<PushPull>>, Pin<Gpio20, Output<PushPull>>,
+        ),
     }
 
     #[init]
     fn init(c: init::Context) -> (Shared, Local, init::Monotonics) {
-        // Grab our singleton objects
-        let mut pac = pac::Peripherals::take().unwrap();
-        let core = pac::CorePeripherals::take().unwrap();
-
-        // Set up the watchdog driver - needed by the clock setup code
-        let mut watchdog = hal::Watchdog::new(pac.WATCHDOG);
-
+        let mut resets = c.device.RESETS;
+        // A watchdog is a counter that is incremented internally, and once it overflows it resets the device. This means the watchdog needs to be reset 
+        // regularly in order to prohibit the device from resetting. This means a watchdog prohibits the device from getting stuck or in an infinite loop  
+        let mut watchdog = Watchdog::new(c.device.WATCHDOG);
         // Configure the clocks
-        //
-        // The default is to generate a 125 MHz system clock
         let clocks = hal::clocks::init_clocks_and_plls(
             rp_pico::XOSC_CRYSTAL_FREQ,
-            pac.XOSC,
-            pac.CLOCKS,
-            pac.PLL_SYS,
-            pac.PLL_USB,
-            &mut pac.RESETS,
+            c.device.XOSC,
+            c.device.CLOCKS,
+            c.device.PLL_SYS,
+            c.device.PLL_USB,
+            &mut resets,
             &mut watchdog,
         )
         .ok()
         .unwrap();
 
+
+
         // The delay object lets us wait for specified amounts of time (in
         // milliseconds)
-        let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().integer());
+        let mut delay = cortex_m::delay::Delay::new(c.core.SYST, clocks.system_clock.freq().integer());
 
         // The single-cycle I/O block controls our GPIO pins
-        let sio = hal::Sio::new(pac.SIO);
+        let sio = hal::Sio::new(c.device.SIO);
 
         // Set the pins up according to their function on this particular board
         let pins = rp_pico::Pins::new(
-            pac.IO_BANK0,
-            pac.PADS_BANK0,
+            c.device.IO_BANK0,
+            c.device.PADS_BANK0,
             sio.gpio_bank0,
-            &mut pac.RESETS,
+            &mut resets,
         );
 
-        let mut led_pins: Vec<&'static (dyn OutputPin<Error = Infallible> + Send + Sync), 10> = Vec::new();
-        led_pins.push(&pins.gpio21.into_push_pull_output());
-        led_pins.push(&pins.gpio22.into_push_pull_output());
-        led_pins.push(&pins.gpio26.into_push_pull_output());
-        led_pins.push(&pins.gpio27.into_push_pull_output());
-        led_pins.push(&pins.gpio28.into_push_pull_output());
-        led_pins.push(&pins.gpio16.into_push_pull_output());
-        led_pins.push(&pins.gpio17.into_push_pull_output());
-        led_pins.push(&pins.gpio18.into_push_pull_output());
-        led_pins.push(&pins.gpio19.into_push_pull_output());
-        led_pins.push(&pins.gpio20.into_push_pull_output());
-/*
-        [Box::new(pins.gpio21.into_push_pull_output()), &mut pins.gpio22.into_push_pull_output(),
-            &mut pins.gpio26.into_push_pull_output(), &mut pins.gpio27.into_push_pull_output(),
-            &mut pins.gpio28.into_push_pull_output(), &mut pins.gpio16.into_push_pull_output(),
-            &mut pins.gpio17.into_push_pull_output(), &mut pins.gpio18.into_push_pull_output(),
-            &mut pins.gpio19.into_push_pull_output(), &mut pins.gpio20.into_push_pull_output(),
-        ];*/
-        
+        let led_pins = (
+            pins.gpio21.into_push_pull_output(), pins.gpio22.into_push_pull_output(),
+            pins.gpio26.into_push_pull_output(), pins.gpio27.into_push_pull_output(),
+            pins.gpio28.into_push_pull_output(), pins.gpio16.into_push_pull_output(),
+            pins.gpio17.into_push_pull_output(), pins.gpio18.into_push_pull_output(),
+            pins.gpio19.into_push_pull_output(), pins.gpio20.into_push_pull_output(),
+        );        
+
         pins.gpio15.set_interrupt_enabled(hal::gpio::Interrupt::EdgeHigh, true);
 
         (Shared { rolling: Mutex::new(true), delay }, Local {led_pins}, init::Monotonics())
@@ -123,19 +107,24 @@ mod app{
     /// Executed after the init-task. Replaces the entry task
     #[idle(local = [led_pins], shared = [delay, rolling])]
     fn idle(context: idle::Context) -> ! {
-        let mut led_pins = context.local.led_pins;
+        let led_pins = context.local.led_pins;
+        let mut led_pins_arr: [&mut dyn OutputPin<Error = Infallible>; 10] = [
+            &mut led_pins.0, &mut led_pins.1, &mut led_pins.2, &mut led_pins.3, &mut led_pins.4,
+            &mut led_pins.5, &mut led_pins.6, &mut led_pins.7, &mut led_pins.8, &mut led_pins.9];
+
+        
         let mut delay_mutex = context.shared.delay;
         
-        let led_count = led_pins.len();
+        let led_count = led_pins_arr.len();
 
         // Blink the LED at 1 Hz
         let mut index = 0;
         loop {
             delay_mutex.lock(|delay| {
                 index = (index + 1) % led_count; 
-                let led_pin = &mut led_pins[index];
+                let led_pin = &mut led_pins_arr[index];
                 led_pin.set_high().unwrap();
-                delay.delay_ms(50);
+                delay.delay_ms(30);
                 led_pin.set_low().unwrap();
             }
             )
