@@ -13,11 +13,8 @@
 
 #[rtic::app(device = rp_pico::hal::pac, peripherals = true)]
 mod app{
-
     use core::convert::Infallible;
     use cortex_m::interrupt::Mutex;
-    // The macro for our start-up function
-    use cortex_m_rt::entry;
 
     // GPIO traits
     use embedded_hal::digital::v2::OutputPin;
@@ -25,15 +22,15 @@ mod app{
     // Time handling traits
     use embedded_time::rate::*;
 
-    use heapless::Vec;
     // Ensure we halt the program on panic (if we don't mention this crate it won't
     // be linked)
     use panic_halt as _;
 
     use rp_pico::hal::gpio::bank0::*;
-    use rp_pico::hal::gpio::{Interrupt, PushPull, Output};
-    // Pull in any important traits
-    use rp_pico::hal::{self, prelude::*, pac, Watchdog, gpio::pin::Pin};
+    use rp_pico::hal::gpio::{PushPull, Output};
+    use rp_pico::hal::{self, prelude::*, Watchdog, gpio::pin::Pin};
+
+    const NORMAL_RUN_DELAY_MS: u32 = 30;
 
     #[shared]
     struct Shared {
@@ -78,7 +75,7 @@ mod app{
 
         // The delay object lets us wait for specified amounts of time (in
         // milliseconds)
-        let mut delay = cortex_m::delay::Delay::new(c.core.SYST, clocks.system_clock.freq().integer());
+        let delay = cortex_m::delay::Delay::new(c.core.SYST, clocks.system_clock.freq().integer());
 
         // The single-cycle I/O block controls our GPIO pins
         let sio = hal::Sio::new(c.device.SIO);
@@ -124,7 +121,7 @@ mod app{
                 index = (index + 1) % led_count; 
                 let led_pin = &mut led_pins_arr[index];
                 led_pin.set_high().unwrap();
-                delay.delay_ms(30);
+                delay.delay_ms(NORMAL_RUN_DELAY_MS);
                 led_pin.set_low().unwrap();
             }
             )
