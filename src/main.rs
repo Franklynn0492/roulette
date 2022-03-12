@@ -13,7 +13,6 @@
 
 #[rtic::app(device = rp_pico::hal::pac, peripherals = true)]
 mod app{
-    use core::convert::Infallible;
     use core::sync::atomic::{AtomicBool, AtomicU32};
 
     // GPIO traits
@@ -32,15 +31,71 @@ mod app{
     use rtic::{Mutex};
 
     const RUN_DELAY_DEFAULT_MS: u32 = 15;
-    const RUN_DELAY_MAX_MS: u32 = 20000;
+    const RUN_DELAY_MAX_MS: u32 = 1500;
+
+    type RoulettePins = (
+        Pin<Gpio21, Output<PushPull>>, Pin<Gpio22, Output<PushPull>>,
+        Pin<Gpio26, Output<PushPull>>, Pin<Gpio27, Output<PushPull>>,
+        Pin<Gpio28, Output<PushPull>>, Pin<Gpio16, Output<PushPull>>,
+        Pin<Gpio17, Output<PushPull>>, Pin<Gpio18, Output<PushPull>>,
+        Pin<Gpio19, Output<PushPull>>, Pin<Gpio20, Output<PushPull>>,
+    );
+
+    pub struct Roulette {
+        current_index: u8,
+        led_pins: RoulettePins,
+    }
+
+    impl Roulette {
+        pub fn new(mut led_pins: RoulettePins) -> Roulette {
+
+            let mut roulette = Roulette{current_index: 0, led_pins};
+
+            roulette.set_pin_state(0, true);
+            for i in 1..9 {
+                roulette.set_pin_state(i, false);
+            }
+
+
+            roulette
+        }
+
+        pub fn shift(&mut self) {
+            let led_count = 10;
+            self.set_pin_state(self.current_index, false);
+            self.current_index = (self.current_index + 1) % led_count;
+            self.set_pin_state(self.current_index, true);
+        }
+
+        fn set_pin_state(&mut self, index: u8, state: bool) {
+/*
+            let mut led_pins_arr: [&mut dyn OutputPin<Error = Infallible>; 10] = [
+                &mut led_pins.0, &mut led_pins.1, &mut led_pins.2, &mut led_pins.3, &mut led_pins.4,
+                &mut led_pins.5, &mut led_pins.6, &mut led_pins.7, &mut led_pins.8, &mut led_pins.9];*/
+            let state = if state { PinState::High} else {PinState::Low};
+            match index % 10 {
+                0 => self.led_pins.0.set_state(state).unwrap(),
+                1 => self.led_pins.1.set_state(state).unwrap(),
+                2 => self.led_pins.2.set_state(state).unwrap(),
+                3 => self.led_pins.3.set_state(state).unwrap(),
+                4 => self.led_pins.4.set_state(state).unwrap(),
+                5 => self.led_pins.5.set_state(state).unwrap(),
+                6 => self.led_pins.6.set_state(state).unwrap(),
+                7 => self.led_pins.7.set_state(state).unwrap(),
+                8 => self.led_pins.8.set_state(state).unwrap(),
+                9 => self.led_pins.9.set_state(state).unwrap(),
+                _ => self.led_pins.0.set_state(state).unwrap()
+            };
+        }
+    }
 
     #[shared]
     struct Shared {
         rolling: AtomicBool,
         display_toggle_pin: Pin<Gpio2, Output<PushPull>>,
         button_pin: Pin<Gpio15, PullDownInput>,
-        roulette_delay_ms: AtomicU32,
         delay: cortex_m::delay::Delay,
+        roulette: Roulette,
     }
 
 
@@ -48,13 +103,6 @@ mod app{
     /// In my own words: local resources are initialized by the init-task and can only be accessed by a single task
     #[local]
     struct Local {
-        led_pins: (
-            Pin<Gpio21, Output<PushPull>>, Pin<Gpio22, Output<PushPull>>,
-            Pin<Gpio26, Output<PushPull>>, Pin<Gpio27, Output<PushPull>>,
-            Pin<Gpio28, Output<PushPull>>, Pin<Gpio16, Output<PushPull>>,
-            Pin<Gpio17, Output<PushPull>>, Pin<Gpio18, Output<PushPull>>,
-            Pin<Gpio19, Output<PushPull>>, Pin<Gpio20, Output<PushPull>>,
-        ),
     }
 
     #[init]
@@ -93,7 +141,7 @@ mod app{
             &mut resets,
         );
 
-        let led_pins = (
+        let led_pins: RoulettePins = (
             pins.gpio21.into_push_pull_output(), pins.gpio22.into_push_pull_output(),
             pins.gpio26.into_push_pull_output(), pins.gpio27.into_push_pull_output(),
             pins.gpio28.into_push_pull_output(), pins.gpio16.into_push_pull_output(),
@@ -105,58 +153,43 @@ mod app{
         button_pin.set_interrupt_enabled(hal::gpio::Interrupt::EdgeHigh, true);
         let display_toggle_pin = pins.gpio2.into_push_pull_output();
 
-        (Shared { rolling: AtomicBool::new(false), display_toggle_pin, button_pin, roulette_delay_ms: AtomicU32::new(RUN_DELAY_DEFAULT_MS), delay }, Local {led_pins}, init::Monotonics())
+        (Shared { rolling: AtomicBool::new(false), display_toggle_pin, button_pin, delay, roulette: Roulette::new(led_pins) }, Local {}, init::Monotonics())
     }
 
     /// Executed after the init-task. Replaces the entry task
-    #[idle(local = [led_pins], shared = [rolling, display_toggle_pin, roulette_delay_ms, delay])]
+    #[idle(local = [], shared = [rolling, display_toggle_pin, delay, roulette])]
     fn idle(context: idle::Context) -> ! {
         let shared = context.shared;
-        let local = context.local;
-
-        let led_pins = local.led_pins;
-        let mut led_pins_arr: [&mut dyn OutputPin<Error = Infallible>; 10] = [
-            &mut led_pins.0, &mut led_pins.1, &mut led_pins.2, &mut led_pins.3, &mut led_pins.4,
-            &mut led_pins.5, &mut led_pins.6, &mut led_pins.7, &mut led_pins.8, &mut led_pins.9];
-
         
         let mut delay_mutex = shared.delay;
         let mut rolling_mutex = shared.rolling;
+        let mut roulette_mutex = shared.roulette;
         let mut display_toggle_pin_mutex = shared.display_toggle_pin;
-        let mut roulette_delay_ms_mutex = shared.roulette_delay_ms;
         
-        let led_count = led_pins_arr.len();
 
-        let mut index = 0;
-        let mut out_state = PinState::Low;
         loop {
             
-            rolling_mutex.lock(|rolling| {
-                if *rolling.get_mut() {
-                    let mut current_active_pin = &mut led_pins_arr[index];
-                    current_active_pin.set_low().unwrap();
-                    index = (index + 1) % led_count; 
-                    current_active_pin = &mut led_pins_arr[index];
-                    current_active_pin.set_high().unwrap();
-                }
-            });
-            let delay_ms = roulette_delay_ms_mutex.lock(|roulette_delay_ms| {
-                *roulette_delay_ms.get_mut()
-            });
+            let rolling = rolling_mutex.lock(|rolling| { *rolling.get_mut()});
+            if rolling {
+                roulette_mutex.lock(|roulette| {
+                    roulette.shift();
+                });
+            }
 
             delay_mutex.lock(|delay| {
-                delay.delay_ms(delay_ms);
+                delay.delay_ms(RUN_DELAY_DEFAULT_MS);
             });
 
             // TODO: remove this once you have proper control over the display
+            /* 
             if index % 10 == 0 {
                 display_toggle_pin_mutex.lock(|toggle_pin| toggle_pin.set_state(out_state)).unwrap();
                 out_state = if out_state == PinState::Low { PinState::High } else { PinState::Low };
-            }
+            }*/
         }
     }
 
-    #[task(binds = IO_IRQ_BANK0, shared = [rolling, button_pin, roulette_delay_ms, delay])]
+    #[task(binds = IO_IRQ_BANK0, shared = [rolling, button_pin, delay, roulette])]
     fn button_irq_handler(mut context: button_irq_handler::Context) {
         
         let button_pin_mutex = &mut context.shared.button_pin;
@@ -176,12 +209,7 @@ mod app{
     }
 
     fn set_roulette_rolling(context: button_irq_handler::Context) {
-        let mut roulette_delay_ms_mutex = context.shared.roulette_delay_ms;
         let mut rolling_mutex = context.shared.rolling;
-
-        roulette_delay_ms_mutex.lock(|roulette_delay_ms| {
-            roulette_delay_ms.store(RUN_DELAY_DEFAULT_MS, core::sync::atomic::Ordering::Relaxed);
-        });
 
         rolling_mutex.lock(|rolling| {
             rolling.store(true, core::sync::atomic::Ordering::Relaxed);
@@ -189,22 +217,21 @@ mod app{
     }
 
     fn set_roulette_halting(context: button_irq_handler::Context) {
-        let mut roulette_delay_ms_mutex = context.shared.roulette_delay_ms;
         let mut rolling_mutex = context.shared.rolling;
         let mut delay_mutex = context.shared.delay;
+        let mut roulette_mutex = context.shared.roulette;
+        roulette_mutex.lock(|roulette| {
 
-        let roulette_delay_ms_start = roulette_delay_ms_mutex.lock(|roulette_delay_ms| {
-            *roulette_delay_ms.get_mut()
+            let mut next_delay_ms = RUN_DELAY_DEFAULT_MS;
+            while next_delay_ms < RUN_DELAY_MAX_MS {
+
+                roulette.shift();
+                delay_mutex.lock(|delay| {
+                    delay.delay_ms(next_delay_ms);
+                });
+                next_delay_ms = (next_delay_ms as f32 * 1.3) as u32;
+            }
         });
-        for next_delay_ms in (roulette_delay_ms_start..RUN_DELAY_MAX_MS).step_by(100) {
-            roulette_delay_ms_mutex.lock(|roulette_delay_ms| {
-                roulette_delay_ms.store(next_delay_ms, core::sync::atomic::Ordering::Relaxed);
-            });
-
-            delay_mutex.lock(|delay| {
-                delay.delay_ms(100);
-            })
-        }
     
         rolling_mutex.lock(|rolling|{
             rolling.store(false, core::sync::atomic::Ordering::Relaxed);
