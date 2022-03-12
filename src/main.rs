@@ -14,7 +14,7 @@
 #[rtic::app(device = rp_pico::hal::pac, peripherals = true)]
 mod app{
     use core::convert::Infallible;
-    use cortex_m::interrupt::Mutex;
+    use core::sync::atomic::AtomicBool;
 
     // GPIO traits
     use embedded_hal::digital::v2::{OutputPin, PinState};
@@ -26,8 +26,8 @@ mod app{
     // be linked)
     use panic_halt as _;
 
-    use rp_pico::hal::gpio::bank0::*;
-    use rp_pico::hal::gpio::{PushPull, Output};
+    use rp_pico::hal::gpio::{bank0::*, Interrupt};
+    use rp_pico::hal::gpio::{PushPull, PullDownInput, Output};
     use rp_pico::hal::{self, prelude::*, Watchdog, gpio::pin::Pin};
 
     const NORMAL_RUN_DELAY_MS: u32 = 30;
@@ -35,8 +35,9 @@ mod app{
     #[shared]
     struct Shared {
         delay: cortex_m::delay::Delay,
-        rolling: bool,
+        rolling: AtomicBool,
         display_toggle_pin: Pin<Gpio2, Output<PushPull>>,
+        button_pin: Pin<Gpio15, PullDownInput>,
     }
 
 
@@ -97,10 +98,11 @@ mod app{
             pins.gpio19.into_push_pull_output(), pins.gpio20.into_push_pull_output(),
         );        
 
-        pins.gpio15.set_interrupt_enabled(hal::gpio::Interrupt::EdgeHigh, true);
+        let button_pin = pins.gpio15.into_pull_down_input();
+        button_pin.set_interrupt_enabled(hal::gpio::Interrupt::EdgeHigh, true);
         let display_toggle_pin = pins.gpio2.into_push_pull_output();
 
-        (Shared { rolling: false, delay, display_toggle_pin }, Local {led_pins}, init::Monotonics())
+        (Shared { rolling: AtomicBool::new(false), delay, display_toggle_pin, button_pin }, Local {led_pins}, init::Monotonics())
     }
 
     /// Executed after the init-task. Replaces the entry task
@@ -111,10 +113,10 @@ mod app{
             &mut led_pins.0, &mut led_pins.1, &mut led_pins.2, &mut led_pins.3, &mut led_pins.4,
             &mut led_pins.5, &mut led_pins.6, &mut led_pins.7, &mut led_pins.8, &mut led_pins.9];
 
-        
-        let mut delay_mutex = context.shared.delay;
-        let mut rolling_mutex = context.shared.rolling;
-        let mut display_toggle_pin_mutex = context.shared.display_toggle_pin;
+        let shared = context.shared;
+        let mut delay_mutex = shared.delay;
+        let mut rolling_mutex = shared.rolling;
+        let mut display_toggle_pin_mutex = shared.display_toggle_pin;
         
         let led_count = led_pins_arr.len();
 
@@ -124,7 +126,7 @@ mod app{
             
             delay_mutex.lock(|delay| {
                 rolling_mutex.lock(|rolling|
-                    if *rolling {
+                    if *rolling.get_mut() {
                         let mut current_active_pin = &mut led_pins_arr[index];
                         current_active_pin.set_low().unwrap();
                         index = (index + 1) % led_count; 
@@ -140,5 +142,19 @@ mod app{
             }
         }
     }
+
+    #[task(binds = IO_IRQ_BANK0, shared = [rolling, button_pin])]
+    fn button_irq_handler(context: button_irq_handler::Context) {
+
+        let mut button_pin_mutex = context.shared.button_pin;
+        button_pin_mutex.lock(|pin| pin.clear_interrupt(Interrupt::EdgeHigh));
+        let mut rolling_mutex = context.shared.rolling;
+        rolling_mutex.lock(|rolling| {
+            let old_value = *rolling.get_mut();
+            rolling.store(!old_value, core::sync::atomic::Ordering::Relaxed)
+        });
+
+    }
+
 }
 // End of file
